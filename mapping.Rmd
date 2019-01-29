@@ -1,0 +1,281 @@
+---
+title: "Mapping Assignment"
+author: "Megha, Sky, Xuan, Yifu"
+date: "Nov 6, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+library(knitr)
+library(tidyverse)
+library(maps)
+library(rgdal)
+library(devtools)
+library(maptools)
+library(plyr)
+library(raster)
+library(leaflet)
+knitr::opts_chunk$set(echo = TRUE)
+
+```
+
+## Mapping
+
+Our project is about food establishment inspection. The Health Division of the Department of Inspectional Services ensures that all food establishments in the City of Boston meet relevant sanitary codes and standards.  The data contains records of individual inspections and results.
+
+**Since "leaflet" cannot support much data(Our Rstudio gets stuck every time we run a daraframe with over 30000 rows), we will not show the whole dataset**
+
+Now we're gonna explore what's interesting in our inspection data.
+
+```{r,include=FALSE}
+#import data and extracting
+library(readr)
+mayorsfoodcourt <- read_csv("~/Desktop/615Mapping/mayorsfoodcourt.csv")
+
+
+##string extracting. Get longtitude and latitude
+mayorsfoodcourt$long <- as.numeric(substring(mayorsfoodcourt$Location, 16, 28))
+mayorsfoodcourt$lat <- as.numeric(substring(mayorsfoodcourt$Location, 2, 13))
+```
+
+
+##Map1
+
+First map shows the comparation of restaurants in Allston, Brighton, Fenway and Boston. 
+
+```{r}
+#filter
+#get a function
+allston <-  filter(mayorsfoodcourt, CITY=="Allston")
+map1 <-  filter(mayorsfoodcourt, CITY=="Allston"|CITY=="Brighton"|CITY=="Fenway"|CITY=="Boston")
+map1 <- filter(map1,map1$ViolLevel=="*")
+
+
+map2 <- mutate(map1,cities=ifelse(CITY=="Boston",0,ifelse(CITY=="Allston",1,ifelse(CITY=="Brighton",2,3))))
+
+getColor <- function(map2) {
+  sapply(map2$cities, function(cities) {
+    if(cities==0) {
+      "green"
+    } else if(cities==1) {
+      "orange"
+    } else if(cities==2){"lightgray"}
+    else{
+      "red"
+    } })
+}
+
+icons <- awesomeIcons(
+  icon = 'ios-close',
+  iconColor = 'white',
+  library = 'ion',
+  markerColor = getColor(map2)
+)
+
+
+leaflet(data = map1[1:3000,]) %>% addTiles() %>%
+  addAwesomeMarkers(~long, ~lat,icon = icons,popup = ~as.character(businessName))
+
+
+```
+
+We find that there is much less restaurant in Brighton and Allston than Boston. It's obvious Boston is the most thriving region. And the data in Fenway are NAs so cannot be shown in our map. 
+Also, the restaurants with highest level in Brighton seems to be more spread out, compared to restaurants in Allston and Boston.  We know from the map that it's because of the geographic characteristic of these districts
+
+
+##Map2
+
+Then let's look at the restaurants with most times of inspections. 
+
+```{r}
+mostsevere <- tail(names(sort(table(allston$businessName))), 20)
+allstonmostsevere <- filter(allston,allston$businessName==mostsevere[1:20])
+count <- count(allstonmostsevere[,1])
+
+##outer join
+allstonmostsevere <- merge(allstonmostsevere,count,by="businessName",all=TRUE)
+  
+##give different colors to different intervals
+getColor <- function(allstonmostsevere) {
+  sapply(allstonmostsevere$freq, function(freq) {
+    if(freq <= 10) {
+      "green"
+    } else if(freq <= 20) {
+      "orange"
+    } else {
+      "red"
+    } })
+}
+
+icons <- awesomeIcons(
+  icon = 'ios-close',
+  iconColor = 'black',
+  library = 'ion',
+  markerColor = getColor(allstonmostsevere)
+)
+
+#map
+leaflet(data = allstonmostsevere) %>% addTiles() %>%
+  addAwesomeMarkers(~long, ~lat,icon=icons, label=~as.character(freq),popup = ~as.character(businessName))
+
+```
+
+We list top 20 restaurants which are inspected most times by The Health Division of the Department of Inspectional Services in Allston. 
+
+From this map, we know that most restaurants in Allston are inspected less than 20 unit times. However, there are 2 restaurants being inspected more than 20 unit times. By using "count" function, we know these two restaurants are "SHANGHAI GATEWAY RESTAURANT", and "GRASSHOPPER VEGETARIAN". 
+
+**We don't know why these two restaurants are inspected more times. So we try to look at their data, we found that "SHANGHAI GATEWAY RESTAURANT" has 814 records of inspections, and about 204 records have the violation status of "Pass", which means the ratio of pass is about 25%. The other restaurant is the same. **
+
+**So maybe we should to choose those restaurants with green markers on the map.**
+
+
+##Map3
+
+In order to further prove this point, we draw a map containing all the restaurants in 4 districtis classified by count interval.
+
+```{r}
+#filter
+map3 <-count(map2[,1])
+map3 <- map3[order(map3$freq,decreasing = T),]
+#outer join
+countmap3 <- merge(map2,map3,by="businessName",all=TRUE)
+allmostsevere <- filter(countmap3,businessName==map3[1:1000,1])
+
+
+getColor <- function(allmostsevere) {
+  sapply(allmostsevere$freq, function(freq) {
+  if(freq >= 100 & freq <200) {
+    "lightgrey"
+  } else if(freq < 100 & freq >=1){
+    "green"
+  } else if( freq >=200 & freq <400){
+    "beige"
+  } else if( freq >=400 & freq <700){
+    "lightgreen"
+  } else if(freq >=700 & freq <800){
+    "lightred"
+  }
+    else{"blue"}
+    })
+}
+icons <- awesomeIcons(
+  icon = "coffee",
+  iconColor = 'white',
+  library = 'ion',
+  markerColor = getColor(allmostsevere)
+)
+
+
+leaflet(allmostsevere) %>% 
+  addTiles() %>% 
+  addAwesomeMarkers(~long, ~lat, icon=icons, popup = ~as.character(businessName),  options = popupOptions(closeButton = FALSE), label = ~as.character(count))%>%
+  addLegend("bottomright",colors=c("green","lightgrey","beige","lightgreen","red","blue"),labels = c("<100","100~200","200~400","400~700","700~800",">800"),title = "Violation Counts", opacity = 1)
+```
+
+In this map, we only use 1000 data since leaflet cannot support too much data, but we still find a **blue** spot in the map, which mean this restaurant has been inspected over 800 times during the period....
+
+Then we find,from the map, that this restaurant is "Au Bon Pain". 
+
+From filtering, we find that "Au Bon Pain" has been inspected for 853 times. And: 
+
+```{r}
+aubonpain <- filter(map2,map2$businessName=="Au Bon Pain"&map2$ViolStatus=="Pass")
+```
+
+it passed 375 times, which means the passing ratio is 375/853=44%. 
+
+**We cannot say the less times being inspected, the more heathier. Definitely more quantitative analysis is needed. But from our two maps and simple analysis, we'd better be cautious if eating in the restaurants being inspected many times.**
+
+
+##Map4
+
+The fourth map is to show the restaurants in 4 districts classified by violation level. 
+
+```{r}
+library(tidycensus)
+
+map4 <- mutate(map1,level=ifelse(ViolLevel=="*",1,ifelse(ViolLevel=="**",2,3)))
+#choose 4000 rows of data, since leaflet cannot support too much rows of data.
+map4 <- filter(map4,!(is.na(map4$level)))
+map5 <- map4[1:4000,]
+
+pal <- colorFactor(
+  palette = c('red', 'blue', 'orange'),
+  domain = map5$level
+)
+#map
+leaflet(data = map5) %>% addTiles() %>%
+  addCircles(~long, ~lat,weight = 1, 
+             radius = ~level*60, popup = ~as.character(businessName),color = ~pal(level))%>%
+  addLegend("bottomright",colors=c('red', 'blue', 'orange'),labels = c("*","**","***"),title = "Violation Level", opacity = 1)
+
+
+```
+
+This map is to show which kind of levels every restaurant has. 
+
+You can click every spot on the map to know the name of the resraturant. 
+
+From the map, we can easily know that some resraturants have all 3 level during inspections, while some resraurants only get one level, either the highest level or the lowest level. **When finding a safe resraurant, we can pay attetion to those restaurants shown on our map only as orange spots and avoid those only shown as red spots.**
+
+
+##Map5
+**_Next in our analysis, we look at the top three reasons accounting for the violations in the 20 restaurants that were inspected the most. They are: Non-Food Contact Surfaces Clean, Improper Maintenance of Floors and Food Protection. The map below shows the locations of these restaurants with their violation descriptions as the tags._**
+
+```{r}
+#Filtering the most repeated reason for Violation in the 20 restaurants being inspected the most
+reason <- tail(names(sort(table(allstonmostsevere$ViolDesc))),3)
+
+#Subsetting for the top three violation reasons
+violdesc <- subset(allstonmostsevere, allstonmostsevere$ViolDesc == "Non-Food Contact Surfaces Clean" | allstonmostsevere$ViolDesc == "Improper Maintenance of Floors" | allstonmostsevere$ViolDesc == "Food Protection")
+violdesc <- violdesc[!is.na(violdesc$ViolDesc),]
+
+#Making different icon to display on the map
+violicon <- makeIcon(
+  iconUrl = "https://melbournechapter.net/images/foods-clipart-7.png",
+  iconWidth = 35, iconHeight = 35 
+)
+label <- paste(violdesc$businessName, violdesc$ViolDesc, sep = ",")
+
+#map
+leaflet(data = violdesc[1:60,]) %>% addTiles() %>% 
+  addMarkers(~long, ~lat,icon = violicon, label=~label)
+```
+
+**_As mentioned earlier, we now look into the violation descriptions of the restaurants in Allston that were inspected more than 20 times, "Shanghai Gateway Restaurant" and "Grasshopper Vegetarian" and locate these two restaurants on the map._**
+
+
+##Map6 
+
+```{r}
+viol_2 <- mayorsfoodcourt %>%
+  filter(businessName == "SHANGHAI GATEWAY RESTAURANT"| businessName == "GRASSHOPPER VEGETARIAN")
+
+icon <- makeIcon(
+  iconUrl = "https://cdn2.iconfinder.com/data/icons/mix-color-5/100/Mix_color_5__info-512.png",
+  iconWidth = 35, iconHeight = 35 
+)
+content <- paste(sep = "<br/>",
+  "<b><a href='http://shanghaigateboston.com/'>Shanghai Gateway Restaurant</a></b>",
+  "204 Harvard Ave",
+  "Allston, MA 02134"
+)
+
+content1 <- paste(sep = "<br/>",
+  "<b><a href='https://www.grasshoppervegan.com/'>Grasshopper Vegetarian Restaurant</a></b>",
+  "1 N Beacon St",
+  "Allston, MA 02134"
+)
+
+leaflet(viol_2) %>% addTiles() %>%
+  addPopups(-71.13746, 42.35377, content, options = popupOptions(closeButton = FALSE))%>%
+  addPopups(-71.13048, 42.34996, content1, options = popupOptions(closeButton = FALSE))%>%
+  addMarkers(~long, ~lat, icon = icon, label = ~as.character(ViolDesc))
+```
+
+**_Seen above are Shanghai Gateway and Grasshopper Vegetarian restaurants in Allston. The popups show their address. Clicking the name of the restaurant opens up the website of the restaurant. Both these restaurants have a rating of 4 and above on Google, but they have a pass ratio of only 25%, as mentioned earlier._**
+
+
+
+
+
